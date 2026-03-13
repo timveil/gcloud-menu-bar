@@ -432,20 +432,19 @@ final class GCloudManager {
     }
 
     /// Opens a new Terminal window and runs the given command interactively.
-    /// The command string is escaped to prevent AppleScript injection.
+    /// Writes a temp .command file and opens it with NSWorkspace — no Apple Events entitlement needed.
     private func runInTerminal(_ command: String) {
-        let escaped = command
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-        let script = """
-        tell application "Terminal"
-            activate
-            do script "\(escaped)"
-        end tell
-        """
-        var error: NSDictionary?
-        if NSAppleScript(source: script)?.executeAndReturnError(&error) == nil {
-            errorMessage = "AppleScript error: \(error?["NSAppleScriptErrorMessage"] as? String ?? "unknown")"
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("gcloud-\(UUID().uuidString).command")
+        let script = "#!/bin/bash\n\(command)\n"
+        do {
+            try script.write(to: tmpURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755], ofItemAtPath: tmpURL.path
+            )
+            NSWorkspace.shared.open(tmpURL)
+        } catch {
+            errorMessage = "Failed to open Terminal: \(error.localizedDescription)"
         }
     }
 }

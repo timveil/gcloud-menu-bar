@@ -1,0 +1,45 @@
+name: GCloudMenuBar
+options:
+  bundleIdPrefix: com.timveil
+  deploymentTarget:
+    macOS: "14.0"
+  xcodeVersion: "16.0"
+  generateEmptyDirectories: true
+
+targets:
+  GCloudMenuBar:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/GCloudMenuBar
+    resources:
+      - path: Assets.xcassets
+    info:
+      path: Info.plist
+      properties: {}
+    entitlements:
+      path: GCloudMenuBar.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.timveil.GCloudMenuBar
+        PRODUCT_NAME: GCloudMenuBar
+        SWIFT_VERSION: "6.0"
+        MACOSX_DEPLOYMENT_TARGET: "14.0"
+        INFOPLIST_FILE: Info.plist
+        CODE_SIGN_ENTITLEMENTS: GCloudMenuBar.entitlements
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_APP_SANDBOX: NO
+        ENABLE_HARDENED_RUNTIME: YES
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_STRICT_CONCURRENCY: complete
+      configs:
+        Debug:
+          SWIFT_OPTIMIZATION_LEVEL: "-Onone"
+          DEBUG_INFORMATION_FORMAT: dwarf
+        Release:
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
+          DEBUG_INFORMATION_FORMAT: dwarf-with-dsym
+          DEAD_CODE_STRIPPING: YES

@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>GCloudMenuBar</string>
+    <key>CFBundleDisplayName</key>
+    <string>GCloud Menu Bar</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.timveil.GCloudMenuBar</string>
+    <key>CFBundleVersion</key>
+    <string>$(CURRENT_PROJECT_VERSION)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>$(MARKETING_VERSION)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <!-- No Dock icon, no App Switcher entry — pure menu bar agent -->
+    <key>LSUIElement</key>
+    <true/>
+    <!-- Required for NSAppleScript to drive Terminal -->
+    <key>NSAppleEventsUsageDescription</key>
+    <string>GCloud Menu Bar uses AppleScript to open a Terminal window for the gcloud auth login flow.</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+</dict>
+</plist>

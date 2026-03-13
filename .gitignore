@@ -1,0 +1,24 @@
+# Generated Xcode project — use `make generate` to recreate
+*.xcodeproj/
+
+# Build artifacts
+build/
+DerivedData/
+*.xcarchive
+
+# Xcode user data
+xcuserdata/
+*.xcuserstate
+
+# macOS
+.DS_Store
+**/.DS_Store
+
+# SPM (not used in this project, but keep clean)
+.build/
+.swiftpm/
+
+# Signing (contains team ID — remove ignore once scrubbed)
+ExportOptions.plist
+*.p12
+*.mobileprovision

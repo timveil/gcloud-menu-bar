@@ -1,6 +1,11 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
+private enum Layout {
+    static let menuWidth: CGFloat = 320
+    static let scrollMaxHeight: CGFloat = 220
+}
+
 // MARK: - Root Menubar View
 
 struct MenuBarView: View {
@@ -36,7 +41,7 @@ struct MenuBarView: View {
             Divider()
             footerSection
         }
-        .frame(width: 360)
+        .frame(width: Layout.menuWidth)
         .background(Color(NSColor.windowBackgroundColor))
     }
 
@@ -301,7 +306,7 @@ struct MenuBarView: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 280)
+                    .frame(maxHeight: Layout.scrollMaxHeight)
                 }
             }
         }
@@ -397,7 +402,7 @@ struct MenuBarView: View {
                         Button("Export") { exportConsoleLogs() }
                             .buttonStyle(LinkButtonStyle())
                             .opacity(manager.commandLog.isEmpty ? 0 : 1)
-                        Button("Clear") { manager.commandLog.removeAll() }
+                        Button("Clear") { manager.clearCommandLog() }
                             .buttonStyle(LinkButtonStyle())
                             .opacity(manager.commandLog.isEmpty ? 0 : 1)
                     }
@@ -415,7 +420,7 @@ struct MenuBarView: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: Layout.scrollMaxHeight)
                 }
             }
         }

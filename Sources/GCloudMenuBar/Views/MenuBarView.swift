@@ -442,17 +442,22 @@ struct ConsoleEntryRow: View {
             }
 
             if !entry.output.isEmpty {
+                let truncates = entry.output.contains("\n")
+                              ? entry.output.components(separatedBy: "\n").count > 3
+                              : entry.output.count > 150
                 Text(entry.output)
                     .font(.caption2)
                     .fontDesign(.monospaced)
                     .foregroundColor(.secondary)
                     .lineLimit(expanded ? nil : 3)
                     .textSelection(.enabled)
-                    .onTapGesture { expanded.toggle() }
-                if !expanded {
-                    Text("Tap to expand")
-                        .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                if truncates {
+                    Button { expanded.toggle() } label: {
+                        Text(expanded ? "Show less" : "Show more")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
 

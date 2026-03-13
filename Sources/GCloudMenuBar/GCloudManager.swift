@@ -18,7 +18,7 @@ final class GCloudManager {
 
     // MARK: - Private
 
-    private var refreshTask: Task<Void, Never>?
+    nonisolated(unsafe) private var refreshTask: Task<Void, Never>?
     private let tokenRefreshInterval: TimeInterval = 60   // check every 60s
     private var gcloudPath: String = "/usr/bin/gcloud"
 
@@ -64,8 +64,9 @@ final class GCloudManager {
     private func startTimer() {
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(tokenRefreshInterval))
-                await self?.refreshAuthStatus()
+                guard let self else { return }
+                try? await Task.sleep(for: .seconds(self.tokenRefreshInterval))
+                await self.refreshAuthStatus()
             }
         }
     }
@@ -189,7 +190,7 @@ final class GCloudManager {
     // MARK: - Shell Execution
 
     nonisolated private func shell(_ args: [String]) async -> (String, Int32) {
-        await Task.detached(priority: .userInitiated) { @Sendable in
+        await withCheckedContinuation { continuation in
             let process = Process()
             let pipe    = Pipe()
 
@@ -204,23 +205,27 @@ final class GCloudManager {
             process.standardOutput = pipe
             process.standardError  = pipe
 
-            let sema = DispatchSemaphore(value: 0)
-            process.terminationHandler = { _ in sema.signal() }
+            // Termination handler resumes the continuation exactly once,
+            // whether the process exits naturally or is killed by the timeout below.
+            process.terminationHandler = { proc in
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                continuation.resume(returning: (output, proc.terminationStatus))
+            }
 
             do {
                 try process.run()
             } catch {
-                return ("", 1)
+                continuation.resume(returning: ("", 1))
+                return
             }
 
-            if sema.wait(timeout: .now() + 15) == .timedOut {
-                process.terminate()
-                return ("", 124)
+            // 15-second timeout: terminate the process; the termination handler
+            // fires and resumes the continuation with whatever exit code results.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
+                if process.isRunning { process.terminate() }
             }
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            return (String(data: data, encoding: .utf8) ?? "", process.terminationStatus)
-        }.value
+        }
     }
 
     /// Opens a new Terminal window and runs the given command interactively.

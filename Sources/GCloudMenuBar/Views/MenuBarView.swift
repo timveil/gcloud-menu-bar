@@ -9,6 +9,8 @@ struct MenuBarView: View {
     @State private var showProjects: Bool = false
     @State private var showUpdates: Bool = false
     @State private var showConsole: Bool = false
+    @State private var projectSearch: String = ""
+    @State private var collapsedGroups: Set<String> = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -215,6 +217,18 @@ struct MenuBarView: View {
         manager.projectGroups.reduce(0) { $0 + $1.projects.count }
     }
 
+    private var filteredProjectGroups: [ProjectGroup] {
+        guard !projectSearch.isEmpty else { return manager.projectGroups }
+        let query = projectSearch.lowercased()
+        return manager.projectGroups.compactMap { group in
+            let matches = group.projects.filter {
+                $0.name.lowercased().contains(query) || $0.projectId.lowercased().contains(query)
+            }
+            guard !matches.isEmpty else { return nil }
+            return ProjectGroup(id: group.id, orgName: group.orgName, projects: matches)
+        }
+    }
+
     private var projectSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader(
@@ -223,17 +237,22 @@ struct MenuBarView: View {
                 isExpanded: $showProjects
             )
             if showProjects {
-                if manager.projectGroups.isEmpty {
-                    emptyRow(text: "No projects found")
+                if !manager.projectGroups.isEmpty {
+                    projectSearchField
+                }
+                let groups = filteredProjectGroups
+                if groups.isEmpty {
+                    emptyRow(text: projectSearch.isEmpty ? "No projects found" : "No matching projects")
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(manager.projectGroups) { group in
-                                if manager.projectGroups.count > 1 {
-                                    orgHeader(group.orgName)
-                                }
-                                ForEach(group.projects) { project in
-                                    ProjectRow(project: project)
+                            ForEach(groups) { group in
+                                let isCollapsed = projectSearch.isEmpty && collapsedGroups.contains(group.id)
+                                orgHeader(group, count: group.projects.count, isCollapsed: isCollapsed)
+                                if !isCollapsed {
+                                    ForEach(group.projects) { project in
+                                        ProjectRow(project: project)
+                                    }
                                 }
                             }
                         }
@@ -244,20 +263,64 @@ struct MenuBarView: View {
         }
     }
 
-    private func orgHeader(_ name: String) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: "building.2")
+    private var projectSearchField: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
                 .font(.caption2)
                 .foregroundColor(.secondary)
-            Text(name)
-                .font(.caption2)
-                .fontWeight(.semibold)
-                .foregroundColor(.secondary)
-            Spacer()
+            TextField("Filter projects…", text: $projectSearch)
+                .font(.caption)
+                .textFieldStyle(.plain)
+            if !projectSearch.isEmpty {
+                Button {
+                    projectSearch = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
         }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 5))
         .padding(.horizontal, 14)
-        .padding(.top, 6)
-        .padding(.bottom, 2)
+        .padding(.vertical, 5)
+    }
+
+    private func orgHeader(_ group: ProjectGroup, count: Int, isCollapsed: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                if collapsedGroups.contains(group.id) {
+                    collapsedGroups.remove(group.id)
+                } else {
+                    collapsedGroups.insert(group.id)
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "building.2")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Text(group.orgName)
+                    .font(.caption2)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.secondary)
+                Text("(\(count))")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Image(systemName: isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 5)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Console

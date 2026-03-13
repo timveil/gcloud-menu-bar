@@ -2,6 +2,13 @@ import Foundation
 import AppKit
 import Observation
 
+private enum Constants {
+    static let tokenExpirySoonThreshold: TimeInterval = 600     // 10 minutes
+    static let tokenExpiryFallback: TimeInterval = 3600         // 1 hour
+    static let processTimeout: TimeInterval = 15                // seconds
+    static let tokenInfoRequestTimeout: TimeInterval = 10       // seconds
+}
+
 @Observable @MainActor
 final class GCloudManager {
 
@@ -27,8 +34,14 @@ final class GCloudManager {
     nonisolated(unsafe) private var refreshTask: Task<Void, Never>?
     private let tokenRefreshInterval: TimeInterval = 60   // check every 60s
     private var gcloudPath: String = "/usr/bin/gcloud"
-    var commandLog: [CommandLogEntry] = []
+    private(set) var commandLog: [CommandLogEntry] = []
     private let maxLogEntries = 100
+
+    private static let logDateFormatter: DateFormatter = {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return fmt
+    }()
 
     // MARK: - Init
 
@@ -116,13 +129,23 @@ final class GCloudManager {
             guard let parent = p.parent, parent.type == "folder" else { return nil }
             return parent.id
         })
+        let folderResults = await withTaskGroup(
+            of: (String, GCloudFolderInfo?).self,
+            returning: [(String, GCloudFolderInfo?)].self
+        ) { group in
+            for folderId in uniqueFolderIds {
+                group.addTask { (folderId, await self.fetchFolderInfo(id: folderId)) }
+            }
+            var results: [(String, GCloudFolderInfo?)] = []
+            for await result in group { results.append(result) }
+            return results
+        }
         var resolvedFolderNames: [String: String] = [:]
         var resolvedFolderOrgs: [String: String] = [:]   // folder ID → parent org ID
-        for folderId in uniqueFolderIds {
-            if let info = await fetchFolderInfo(id: folderId) {
-                resolvedFolderNames[folderId] = info.displayName
-                if info.parentIsOrg { resolvedFolderOrgs[folderId] = info.parentNumericId }
-            }
+        for (folderId, info) in folderResults {
+            guard let info else { continue }
+            resolvedFolderNames[folderId] = info.displayName
+            if info.parentIsOrg { resolvedFolderOrgs[folderId] = info.parentNumericId }
         }
         folderNames   = resolvedFolderNames
         projectGroups = buildProjectGroups(
@@ -202,13 +225,11 @@ final class GCloudManager {
         // For user / external accounts get the token and hit tokeninfo for email + expiry
         let (token, code) = await loggedShell([gcloudPath, "auth", "application-default", "print-access-token"])
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard code == 0, !cleanToken.isEmpty,
-              let url = URL(string: "https://oauth2.googleapis.com/tokeninfo?access_token=\(cleanToken)") else {
+        guard code == 0, !cleanToken.isEmpty else {
             return ADCInfo(credentialType: credType, email: nil, expiresAt: nil)
         }
 
-        if let (data, _) = try? await URLSession.shared.data(from: url),
-           let info = try? JSONDecoder().decode(TokenInfo.self, from: data) {
+        if let info = await fetchTokenInfo(token: cleanToken) {
             return ADCInfo(credentialType: credType, email: info.email, expiresAt: info.expiryDate)
         }
         return ADCInfo(credentialType: credType, email: nil, expiresAt: nil)
@@ -221,11 +242,14 @@ final class GCloudManager {
     }
 
     func formattedConsoleLog() -> String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        let fmt = Self.logDateFormatter
         return commandLog.map { e in
             "=== \(fmt.string(from: e.timestamp)) ===\n$ \(e.command)\nexit \(e.exitCode)\n\n\(e.output)"
         }.joined(separator: "\n\n")
+    }
+
+    func clearCommandLog() {
+        commandLog.removeAll()
     }
 
     private func fetchAccounts() async -> [GCloudAccount] {
@@ -255,6 +279,18 @@ final class GCloudManager {
         ])
         guard code == 0, let data = out.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(GCloudFolderInfo.self, from: data)
+    }
+
+    /// Calls Google's tokeninfo endpoint to retrieve email and expiry for the given access token.
+    private func fetchTokenInfo(token: String) async -> TokenInfo? {
+        guard let url = URL(string: "https://oauth2.googleapis.com/tokeninfo?access_token=\(token)") else {
+            return nil
+        }
+        let request = URLRequest(url: url, timeoutInterval: Constants.tokenInfoRequestTimeout)
+        guard let (data, _) = try? await URLSession.shared.data(for: request) else {
+            return nil
+        }
+        return try? JSONDecoder().decode(TokenInfo.self, from: data)
     }
 
     private func buildProjectGroups(
@@ -298,13 +334,13 @@ final class GCloudManager {
                 ProjectGroup(
                     id: id,
                     orgName: value.orgName,
-                    projects: value.projects.sorted { $0.name.lowercased() < $1.name.lowercased() }
+                    projects: value.projects.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
                 )
             }
             .sorted { a, b in
                 if a.id == "none" { return false }
                 if b.id == "none" { return true }
-                return a.orgName.lowercased() < b.orgName.lowercased()
+                return a.orgName.localizedStandardCompare(b.orgName) == .orderedAscending
             }
     }
 
@@ -323,29 +359,19 @@ final class GCloudManager {
         }
 
         // Hit Google's tokeninfo endpoint to get expiry
-        guard let url = URL(string: "https://oauth2.googleapis.com/tokeninfo?access_token=\(cleanToken)") else {
-            authStatus = .authenticated(expiresAt: Date().addingTimeInterval(3600))
+        guard let info = await fetchTokenInfo(token: cleanToken),
+              let expiry = info.expiryDate else {
+            authStatus = .authenticated(expiresAt: Date().addingTimeInterval(Constants.tokenExpiryFallback))
             return
         }
 
-        do {
-            let (data, _) = try await URLSession.shared.data(from: url)
-            let info = try JSONDecoder().decode(TokenInfo.self, from: data)
-            if let expiry = info.expiryDate {
-                let remaining = expiry.timeIntervalSinceNow
-                if remaining < 0 {
-                    authStatus = .expired
-                } else if remaining < 600 {   // < 10 min
-                    authStatus = .expiringSoon(expiresAt: expiry)
-                } else {
-                    authStatus = .authenticated(expiresAt: expiry)
-                }
-            } else {
-                authStatus = .expired
-            }
-        } catch {
-            // tokeninfo failed — token may be invalid
+        let remaining = expiry.timeIntervalSinceNow
+        if remaining < 0 {
             authStatus = .expired
+        } else if remaining < Constants.tokenExpirySoonThreshold {
+            authStatus = .expiringSoon(expiresAt: expiry)
+        } else {
+            authStatus = .authenticated(expiresAt: expiry)
         }
     }
 
@@ -354,7 +380,11 @@ final class GCloudManager {
     private func shellDecode<T: Decodable>(_ args: [String]) async -> T? {
         let (out, code) = await loggedShell(args)
         guard code == 0, let data = out.data(using: .utf8) else {
-            if code != 0 { errorMessage = "Command failed (exit \(code)): \(args.joined(separator: " "))" }
+            if code != 0 {
+                // Show only the subcommand, not full args which may contain sensitive values
+                let safeCommand = args.prefix(3).joined(separator: " ")
+                errorMessage = "Command failed (exit \(code)): \(safeCommand)…"
+            }
             return nil
         }
         return try? JSONDecoder().decode(T.self, from: data)
@@ -365,12 +395,26 @@ final class GCloudManager {
     }
 
     // Logs the result of a shell call to commandLog, capped at maxLogEntries.
+    // Redacts output of print-access-token commands to prevent credential leakage in exports.
     private func loggedShell(_ args: [String]) async -> (String, Int32) {
         let result = await shell(args)
+        let rawOutput = result.0.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let loggedOutput: String
+        if args.contains(where: { $0.contains("print-access-token") }), result.1 == 0 {
+            if rawOutput.count > 8 {
+                loggedOutput = String(rawOutput.prefix(4)) + "****" + String(rawOutput.suffix(4))
+            } else {
+                loggedOutput = "****"
+            }
+        } else {
+            loggedOutput = rawOutput
+        }
+
         let entry = CommandLogEntry(
             timestamp: Date(),
             command: args.joined(separator: " "),
-            output: result.0.trimmingCharacters(in: .whitespacesAndNewlines),
+            output: loggedOutput,
             exitCode: result.1
         )
         if commandLog.count >= maxLogEntries { commandLog.removeFirst() }
@@ -407,13 +451,15 @@ final class GCloudManager {
             do {
                 try process.run()
             } catch {
+                // run() failed — process never started, terminationHandler will not fire.
+                process.terminationHandler = nil
                 continuation.resume(returning: ("", 1))
                 return
             }
 
-            // 15-second timeout: terminate the process; the termination handler
+            // Timeout: terminate the process; the termination handler
             // fires and resumes the continuation with whatever exit code results.
-            DispatchQueue.global().asyncAfter(deadline: .now() + 15) {
+            DispatchQueue.global().asyncAfter(deadline: .now() + Constants.processTimeout) {
                 if process.isRunning { process.terminate() }
             }
         }
@@ -440,7 +486,7 @@ final class GCloudManager {
         do {
             try script.write(to: tmpURL, atomically: true, encoding: .utf8)
             try FileManager.default.setAttributes(
-                [.posixPermissions: 0o755], ofItemAtPath: tmpURL.path
+                [.posixPermissions: 0o700], ofItemAtPath: tmpURL.path
             )
             NSWorkspace.shared.open(tmpURL)
         } catch {

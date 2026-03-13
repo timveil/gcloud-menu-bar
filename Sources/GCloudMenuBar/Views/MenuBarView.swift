@@ -17,6 +17,8 @@ struct MenuBarView: View {
             headerSection
             Divider()
             authStatusSection
+            Divider()
+            activeProjectSection
             if manager.errorMessage != nil {
                 Divider()
                 errorBanner
@@ -34,7 +36,7 @@ struct MenuBarView: View {
             Divider()
             footerSection
         }
-        .frame(width: 320)
+        .frame(width: 360)
         .background(Color(NSColor.windowBackgroundColor))
     }
 
@@ -114,6 +116,55 @@ struct MenuBarView: View {
         case .unknown:
             EmptyView()
         }
+    }
+
+    // MARK: - Active Project
+
+    private var activeProjectSection: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .font(.title3)
+                .foregroundColor(manager.activeProject.isEmpty ? .secondary : .blue)
+
+            VStack(alignment: .leading, spacing: 2) {
+                if manager.activeProject.isEmpty {
+                    Text("No active project")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                } else if let details = manager.activeProjectDetails {
+                    Text(details.name.isEmpty ? details.projectId : details.name)
+                        .font(.subheadline).fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text(details.projectId)
+                        .font(.caption2).foregroundColor(.secondary)
+                        .lineLimit(1)
+                    HStack(spacing: 8) {
+                        if let org = manager.activeProjectOrgName {
+                            Label(org, systemImage: "building.2")
+                                .font(.caption2).foregroundColor(.secondary)
+                                .lineLimit(1)
+                        }
+                        if !manager.activeRegion.isEmpty {
+                            Label(manager.activeRegion, systemImage: "globe")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                        if !manager.activeZone.isEmpty {
+                            Label(manager.activeZone, systemImage: "mappin.circle")
+                                .font(.caption2).foregroundColor(.secondary)
+                        }
+                    }
+                } else {
+                    Text(manager.activeProject)
+                        .font(.subheadline).fontWeight(.semibold)
+                        .lineLimit(1)
+                    Text("Loading project details…")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Error Banner
@@ -240,25 +291,35 @@ struct MenuBarView: View {
                 if !manager.projectGroups.isEmpty {
                     projectSearchField
                 }
-                let groups = filteredProjectGroups
-                if groups.isEmpty {
+                if filteredProjectGroups.isEmpty {
                     emptyRow(text: projectSearch.isEmpty ? "No projects found" : "No matching projects")
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(groups) { group in
-                                let isCollapsed = projectSearch.isEmpty && collapsedGroups.contains(group.id)
-                                orgHeader(group, count: group.projects.count, isCollapsed: isCollapsed)
-                                if !isCollapsed {
-                                    ForEach(group.projects) { project in
-                                        ProjectRow(project: project)
-                                    }
-                                }
+                            ForEach(filteredProjectGroups) { group in
+                                projectGroupView(group)
                             }
                         }
                     }
-                    .frame(maxHeight: 220)
+                    .frame(maxHeight: 280)
                 }
+            }
+        }
+        .onChange(of: showProjects) { _, isShowing in
+            if !isShowing {
+                collapsedGroups.removeAll()
+                projectSearch = ""
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func projectGroupView(_ group: ProjectGroup) -> some View {
+        let isCollapsed = projectSearch.isEmpty && collapsedGroups.contains(group.id)
+        orgHeader(group, count: group.projects.count, isCollapsed: isCollapsed)
+        if !isCollapsed {
+            ForEach(group.projects) { project in
+                ProjectRow(project: project)
             }
         }
     }
@@ -363,34 +424,15 @@ struct MenuBarView: View {
     // MARK: - Footer
 
     private var footerSection: some View {
-        VStack(spacing: 0) {
-            HStack {
-                Image(systemName: "square.stack.3d.up.fill")
-                    .font(.caption2).foregroundColor(.secondary)
-                Text(manager.activeProject.isEmpty ? "none" : manager.activeProject)
-                    .font(.caption).fontWeight(.medium)
-                    .lineLimit(1).truncationMode(.middle)
-                Spacer()
-                Button("Quit") { NSApplication.shared.terminate(nil) }
-                    .font(.caption).buttonStyle(.plain).foregroundColor(.secondary)
-            }
-            .padding(.horizontal, 14).padding(.vertical, 6)
-
-            if !manager.activeRegion.isEmpty || !manager.activeZone.isEmpty {
-                HStack(spacing: 10) {
-                    if !manager.activeRegion.isEmpty {
-                        Label(manager.activeRegion, systemImage: "globe")
-                            .font(.caption2).foregroundColor(.secondary)
-                    }
-                    if !manager.activeZone.isEmpty {
-                        Label(manager.activeZone, systemImage: "mappin.circle")
-                            .font(.caption2).foregroundColor(.secondary)
-                    }
-                    Spacer()
-                }
-                .padding(.horizontal, 14).padding(.vertical, 4)
-            }
+        HStack {
+            Spacer()
+            Button("Quit") { NSApplication.shared.terminate(nil) }
+                .font(.caption)
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
     }
 
     // MARK: - SDK Updates

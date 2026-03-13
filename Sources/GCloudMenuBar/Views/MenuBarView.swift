@@ -6,6 +6,7 @@ struct MenuBarView: View {
     @Environment(GCloudManager.self) private var manager
     @State private var showAccounts: Bool = false
     @State private var showProjects: Bool = false
+    @State private var showConsole: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -20,6 +21,8 @@ struct MenuBarView: View {
             accountSection
             Divider()
             projectSection
+            Divider()
+            consoleSection
             Divider()
             footerSection
         }
@@ -110,23 +113,37 @@ struct MenuBarView: View {
     @ViewBuilder
     private var errorBanner: some View {
         if let error = manager.errorMessage {
-            HStack(spacing: 8) {
+            HStack(alignment: .top, spacing: 8) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundColor(.orange)
                     .font(.caption)
                 Text(error)
                     .font(.caption)
                     .foregroundColor(.primary)
-                    .lineLimit(2)
+                    .lineLimit(3)
+                    .textSelection(.enabled)
                 Spacer()
-                Button {
-                    manager.errorMessage = nil
-                } label: {
-                    Image(systemName: "xmark")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
+                HStack(spacing: 6) {
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(error, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy error message")
+                    Button {
+                        manager.errorMessage = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Dismiss")
                 }
-                .buttonStyle(.plain)
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
@@ -189,6 +206,40 @@ struct MenuBarView: View {
         }
     }
 
+    // MARK: - Console
+
+    private var consoleSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader(
+                title: "Console",
+                count: manager.commandLog.count,
+                isExpanded: $showConsole,
+                accessory: AnyView(
+                    Button("Clear") {
+                        manager.commandLog.removeAll()
+                    }
+                    .buttonStyle(LinkButtonStyle())
+                    .opacity(manager.commandLog.isEmpty ? 0 : 1)
+                )
+            )
+            if showConsole {
+                if manager.commandLog.isEmpty {
+                    emptyRow(text: "No commands run yet")
+                } else {
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(manager.commandLog.reversed()) { entry in
+                                ConsoleEntryRow(entry: entry)
+                                Divider().padding(.leading, 14)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 220)
+                }
+            }
+        }
+    }
+
     // MARK: - Footer
 
     private var footerSection: some View {
@@ -213,7 +264,12 @@ struct MenuBarView: View {
 
     // MARK: - Helpers
 
-    private func sectionHeader(title: String, count: Int, isExpanded: Binding<Bool>) -> some View {
+    private func sectionHeader(
+        title: String,
+        count: Int,
+        isExpanded: Binding<Bool>,
+        accessory: AnyView? = nil
+    ) -> some View {
         Button {
             withAnimation(.easeInOut(duration: 0.15)) {
                 isExpanded.wrappedValue.toggle()
@@ -229,6 +285,10 @@ struct MenuBarView: View {
                     .font(.caption2)
                     .foregroundColor(.secondary)
                 Spacer()
+                if let accessory {
+                    accessory
+                        .padding(.trailing, 4)
+                }
                 Image(systemName: isExpanded.wrappedValue ? "chevron.up" : "chevron.down")
                     .font(.caption2)
                     .foregroundColor(.secondary)
@@ -342,6 +402,67 @@ struct ProjectRow: View {
                     .foregroundColor(.blue)
             }
         }
+    }
+}
+
+// MARK: - Console Entry Row
+
+struct ConsoleEntryRow: View {
+    let entry: CommandLogEntry
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(entry.succeeded ? Color.green : Color.red)
+                    .frame(width: 6, height: 6)
+                Text(entry.timestamp, style: .time)
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                Text(entry.command)
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .foregroundColor(.primary)
+                Spacer()
+                Button {
+                    let copyText = "$ \(entry.command)\n\(entry.output)\nexit \(entry.exitCode)"
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(copyText, forType: .string)
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Copy command and output")
+            }
+
+            if !entry.output.isEmpty {
+                Text(entry.output)
+                    .font(.caption2)
+                    .fontDesign(.monospaced)
+                    .foregroundColor(.secondary)
+                    .lineLimit(expanded ? nil : 3)
+                    .textSelection(.enabled)
+                    .onTapGesture { expanded.toggle() }
+                if !expanded {
+                    Text("Tap to expand")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
+            Text("exit \(entry.exitCode)")
+                .font(.caption2)
+                .foregroundColor(entry.succeeded ? .green : .red)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 6)
+        .background(entry.succeeded ? Color.clear : Color.red.opacity(0.03))
     }
 }
 

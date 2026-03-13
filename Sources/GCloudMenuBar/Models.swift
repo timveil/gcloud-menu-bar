@@ -88,6 +88,17 @@ struct TokenInfo: Codable, Sendable {
     }
 }
 
+// MARK: - Command Log
+
+struct CommandLogEntry: Identifiable, Sendable {
+    let id = UUID()
+    let timestamp: Date
+    let command: String    // full args joined by space
+    let output: String     // stdout + stderr, trimmed
+    let exitCode: Int32
+    var succeeded: Bool { exitCode == 0 }
+}
+
 // MARK: - Date Helper
 
 extension Date {

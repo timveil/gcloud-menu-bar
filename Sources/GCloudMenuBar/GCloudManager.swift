@@ -21,6 +21,8 @@ final class GCloudManager {
     nonisolated(unsafe) private var refreshTask: Task<Void, Never>?
     private let tokenRefreshInterval: TimeInterval = 60   // check every 60s
     private var gcloudPath: String = "/usr/bin/gcloud"
+    var commandLog: [CommandLogEntry] = []
+    private let maxLogEntries = 100
 
     // MARK: - Init
 
@@ -101,7 +103,7 @@ final class GCloudManager {
     }
 
     func logout(account: String) async {
-        _ = await shell([gcloudPath, "auth", "revoke", account, "--quiet"])
+        _ = await loggedShell([gcloudPath, "auth", "revoke", account, "--quiet"])
         await refresh()
     }
 
@@ -123,7 +125,7 @@ final class GCloudManager {
     }
 
     private func fetchActiveProject() async -> String {
-        let (out, _) = await shell([gcloudPath, "config", "get-value", "project"])
+        let (out, _) = await loggedShell([gcloudPath, "config", "get-value", "project"])
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
@@ -137,7 +139,7 @@ final class GCloudManager {
             return
         }
         // Get access token
-        let (token, code) = await shell([gcloudPath, "auth", "print-access-token", "--account=\(activeAccount)"])
+        let (token, code) = await loggedShell([gcloudPath, "auth", "print-access-token", "--account=\(activeAccount)"])
         let cleanToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard code == 0, !cleanToken.isEmpty else {
@@ -175,7 +177,7 @@ final class GCloudManager {
     // MARK: - Shell Helpers
 
     private func shellDecode<T: Decodable>(_ args: [String]) async -> T? {
-        let (out, code) = await shell(args)
+        let (out, code) = await loggedShell(args)
         guard code == 0, let data = out.data(using: .utf8) else {
             if code != 0 { errorMessage = "Command failed (exit \(code)): \(args.joined(separator: " "))" }
             return nil
@@ -184,7 +186,21 @@ final class GCloudManager {
     }
 
     private func setGCloudConfig(setting: String, value: String) async {
-        _ = await shell([gcloudPath, "config", "set", setting, value])
+        _ = await loggedShell([gcloudPath, "config", "set", setting, value])
+    }
+
+    // Logs the result of a shell call to commandLog, capped at maxLogEntries.
+    private func loggedShell(_ args: [String]) async -> (String, Int32) {
+        let result = await shell(args)
+        let entry = CommandLogEntry(
+            timestamp: Date(),
+            command: args.joined(separator: " "),
+            output: result.0.trimmingCharacters(in: .whitespacesAndNewlines),
+            exitCode: result.1
+        )
+        if commandLog.count >= maxLogEntries { commandLog.removeFirst() }
+        commandLog.append(entry)
+        return result
     }
 
     // MARK: - Shell Execution

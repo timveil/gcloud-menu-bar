@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Root Menubar View
 
@@ -6,6 +7,7 @@ struct MenuBarView: View {
     @Environment(GCloudManager.self) private var manager
     @State private var showAccounts: Bool = false
     @State private var showProjects: Bool = false
+    @State private var showUpdates: Bool = false
     @State private var showConsole: Bool = false
 
     var body: some View {
@@ -21,6 +23,10 @@ struct MenuBarView: View {
             accountSection
             Divider()
             projectSection
+            if !manager.componentsNeedingUpdate.isEmpty {
+                Divider()
+                updatesSection
+            }
             Divider()
             consoleSection
             Divider()
@@ -168,11 +174,34 @@ struct MenuBarView: View {
                         AccountRow(account: account)
                     }
                 }
-                HStack(spacing: 8) {
-                    Button("+ Add Account") { manager.login() }
-                        .buttonStyle(LinkButtonStyle())
-                    Button("+ App Default") { manager.login(applicationDefault: true) }
-                        .buttonStyle(LinkButtonStyle())
+                Divider().padding(.leading, 14)
+                HStack(spacing: 10) {
+                    Circle()
+                        .fill(manager.adcInfo != nil ? Color.green : Color.gray.opacity(0.35))
+                        .frame(width: 7, height: 7)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Application Default Credentials")
+                            .font(.caption).fontWeight(.medium)
+                        Text(manager.adcInfo?.detailLabel ?? "Not configured")
+                            .font(.caption2).foregroundColor(.secondary)
+                            .lineLimit(1).truncationMode(.middle)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Button("Login (Browser)") { manager.login() }
+                            .buttonStyle(LinkButtonStyle())
+                            .help("Opens Terminal to run 'gcloud auth login'. Complete the browser OAuth flow, then click Refresh.")
+                        Button("App Default (Browser)") { manager.login(applicationDefault: true) }
+                            .buttonStyle(LinkButtonStyle())
+                            .help("Opens Terminal to run 'gcloud auth application-default login'. Sets credentials used by Google Cloud client libraries. Click Refresh after completing the browser flow.")
+                    }
+                    Text("Both buttons open Terminal for an interactive browser login.")
+                        .font(.caption2).foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
@@ -182,28 +211,53 @@ struct MenuBarView: View {
 
     // MARK: - Projects
 
+    private var totalProjectCount: Int {
+        manager.projectGroups.reduce(0) { $0 + $1.projects.count }
+    }
+
     private var projectSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader(
                 title: "Projects",
-                count: manager.projects.count,
+                count: totalProjectCount,
                 isExpanded: $showProjects
             )
             if showProjects {
-                if manager.projects.isEmpty {
+                if manager.projectGroups.isEmpty {
                     emptyRow(text: "No projects found")
                 } else {
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(manager.projects) { project in
-                                ProjectRow(project: project)
+                            ForEach(manager.projectGroups) { group in
+                                if manager.projectGroups.count > 1 {
+                                    orgHeader(group.orgName)
+                                }
+                                ForEach(group.projects) { project in
+                                    ProjectRow(project: project)
+                                }
                             }
                         }
                     }
-                    .frame(maxHeight: 180)
+                    .frame(maxHeight: 220)
                 }
             }
         }
+    }
+
+    private func orgHeader(_ name: String) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: "building.2")
+                .font(.caption2)
+                .foregroundColor(.secondary)
+            Text(name)
+                .font(.caption2)
+                .fontWeight(.semibold)
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.top, 6)
+        .padding(.bottom, 2)
     }
 
     // MARK: - Console
@@ -215,11 +269,14 @@ struct MenuBarView: View {
                 count: manager.commandLog.count,
                 isExpanded: $showConsole,
                 accessory: AnyView(
-                    Button("Clear") {
-                        manager.commandLog.removeAll()
+                    HStack(spacing: 8) {
+                        Button("Export") { exportConsoleLogs() }
+                            .buttonStyle(LinkButtonStyle())
+                            .opacity(manager.commandLog.isEmpty ? 0 : 1)
+                        Button("Clear") { manager.commandLog.removeAll() }
+                            .buttonStyle(LinkButtonStyle())
+                            .opacity(manager.commandLog.isEmpty ? 0 : 1)
                     }
-                    .buttonStyle(LinkButtonStyle())
-                    .opacity(manager.commandLog.isEmpty ? 0 : 1)
                 )
             )
             if showConsole {
@@ -243,26 +300,95 @@ struct MenuBarView: View {
     // MARK: - Footer
 
     private var footerSection: some View {
-        HStack {
-            Text("Active project: ")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Text(manager.activeProject.isEmpty ? "none" : manager.activeProject)
-                .font(.caption)
-                .fontWeight(.medium)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            Spacer()
-            Button("Quit") { NSApplication.shared.terminate(nil) }
-                .font(.caption)
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+        VStack(spacing: 0) {
+            HStack {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .font(.caption2).foregroundColor(.secondary)
+                Text(manager.activeProject.isEmpty ? "none" : manager.activeProject)
+                    .font(.caption).fontWeight(.medium)
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer()
+                Button("Quit") { NSApplication.shared.terminate(nil) }
+                    .font(.caption).buttonStyle(.plain).foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 6)
+
+            if !manager.activeRegion.isEmpty || !manager.activeZone.isEmpty {
+                HStack(spacing: 10) {
+                    if !manager.activeRegion.isEmpty {
+                        Label(manager.activeRegion, systemImage: "globe")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    if !manager.activeZone.isEmpty {
+                        Label(manager.activeZone, systemImage: "mappin.circle")
+                            .font(.caption2).foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 14).padding(.vertical, 4)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 8)
+    }
+
+    // MARK: - SDK Updates
+
+    private var updatesSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            sectionHeader(
+                title: "SDK Updates",
+                count: manager.componentsNeedingUpdate.count,
+                isExpanded: $showUpdates,
+                accessory: AnyView(
+                    Button("Update") { manager.triggerComponentUpdate() }
+                        .buttonStyle(LinkButtonStyle())
+                        .help(manager.isHomebrewInstall
+                            ? "Opens Terminal to run 'brew upgrade google-cloud-sdk'"
+                            : "Opens Terminal to run 'gcloud components update'")
+                )
+            )
+            if showUpdates {
+                ForEach(manager.componentsNeedingUpdate) { component in
+                    HStack(spacing: 10) {
+                        Circle()
+                            .fill(Color.orange)
+                            .frame(width: 7, height: 7)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(component.name)
+                                .font(.caption).lineLimit(1)
+                            if let current = component.currentVersionString,
+                               let latest = component.latestVersionString {
+                                Text("\(current) → \(latest)")
+                                    .font(.caption2).foregroundColor(.secondary)
+                            }
+                        }
+                        Spacer()
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 5)
+                }
+                Text(manager.isHomebrewInstall
+                     ? "Managed by Homebrew — use 'Update' above to upgrade."
+                     : "Click 'Update' to open Terminal and update all components.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal, 14).padding(.bottom, 6)
+            }
+        }
     }
 
     // MARK: - Helpers
+
+    private func exportConsoleLogs() {
+        let panel = NSSavePanel()
+        panel.title = "Export Console Log"
+        panel.nameFieldStringValue = "gcloud-console-\(ISO8601DateFormatter().string(from: Date())).log"
+        panel.allowedContentTypes = [.plainText]
+        panel.canCreateDirectories = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        do {
+            try manager.formattedConsoleLog().write(to: url, atomically: true, encoding: .utf8)
+        } catch {
+            manager.errorMessage = "Failed to export log: \(error.localizedDescription)"
+        }
+    }
 
     private func sectionHeader(
         title: String,
@@ -384,12 +510,20 @@ struct ProjectRow: View {
 
     var isActive: Bool { project.projectId == manager.activeProject }
 
+    var secondaryText: String {
+        guard let parent = project.parent, parent.type == "folder" else {
+            return project.projectId
+        }
+        let folderLabel = manager.folderNames[parent.id] ?? "Folder \(parent.id)"
+        return "\(project.projectId) · \(folderLabel)"
+    }
+
     var body: some View {
         CloudRow(
             isActive: isActive,
             activeColor: .blue,
             primaryText: project.name.isEmpty ? project.projectId : project.name,
-            secondaryText: project.projectId
+            secondaryText: secondaryText
         ) {
             if !isActive {
                 Button("Use") {

@@ -13,6 +13,11 @@ generate:
 open: generate
 	open $(SCHEME).xcodeproj
 
+## Build and run the Debug app (kills any running instance first)
+run: build
+	pkill -x GCloudMenuBar 2>/dev/null || true
+	open $(BUILD_DIR)/derived/Build/Products/Debug/$(SCHEME).app
+
 ## Build Debug (no signing)
 build: generate
 	xcodebuild -scheme $(SCHEME) -configuration Debug \

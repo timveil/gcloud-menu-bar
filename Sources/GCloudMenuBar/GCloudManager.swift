@@ -29,6 +29,14 @@ final class GCloudManager {
     var componentsNeedingUpdate: [GCloudComponent] = []
     var isHomebrewInstall: Bool = false
 
+    var activeProjectDetails: GCloudProject? {
+        projectGroups.flatMap { $0.projects }.first { $0.projectId == activeProject }
+    }
+
+    var activeProjectOrgName: String? {
+        projectGroups.first { $0.projects.contains { $0.projectId == activeProject } }?.orgName
+    }
+
     // MARK: - Private
 
     nonisolated(unsafe) private var refreshTask: Task<Void, Never>?

@@ -21,9 +21,7 @@ struct MenuBarView: View {
         VStack(spacing: 0) {
             headerSection
             Divider()
-            authStatusSection
-            Divider()
-            activeProjectSection
+            statusCard
             if manager.errorMessage != nil {
                 Divider()
                 errorBanner
@@ -71,70 +69,103 @@ struct MenuBarView: View {
         .padding(.vertical, 10)
     }
 
-    // MARK: - Auth Status
+    // MARK: - Status Card
 
-    private var authStatusSection: some View {
-        HStack(spacing: 10) {
+    /// Single always-visible card showing the three key pieces of local auth state.
+    private var statusCard: some View {
+        VStack(spacing: 0) {
+            cliCredentialsRow
+            Divider().padding(.leading, 46)
+            adcCredentialsRow
+            Divider().padding(.leading, 46)
+            activeProjectRow
+        }
+    }
+
+    // Row 1 — gcloud CLI credentials
+    private var cliCredentialsRow: some View {
+        HStack(alignment: .top, spacing: 10) {
             Image(systemName: manager.authStatus.sfSymbol)
                 .foregroundColor(manager.authStatus.color.swiftUIColor)
                 .font(.title3)
+                .frame(width: 22, alignment: .center)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
-                Text(statusTitle)
+                statusLabel("CLI Credentials")
+                Text(cliAuthTitle)
                     .font(.subheadline).fontWeight(.medium)
+                    .lineLimit(1).truncationMode(.middle)
                 Text(manager.authStatus.label)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .font(.caption2).foregroundColor(.secondary)
             }
             Spacer()
             authActionButton
+                .padding(.top, 2)
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
         .background(manager.authStatus.isExpiringSoon ? Color.yellow.opacity(0.05) : Color.clear)
     }
 
-    private var statusTitle: String {
-        switch manager.authStatus {
-        case .authenticated, .expiringSoon: return manager.activeAccount.isEmpty ? "Authenticated" : manager.activeAccount
-        case .expired:    return "Token Expired — refresh after login"
-        case .noAccount:  return "Not Logged In — refresh after login"
-        case .unknown:    return "Checking…"
-        }
-    }
-
-    @ViewBuilder
-    private var authActionButton: some View {
-        switch manager.authStatus {
-        case .expired, .noAccount:
-            Button("Login") { manager.login() }
-                .buttonStyle(PrimaryButtonStyle(color: .blue))
-        case .expiringSoon:
-            Button("Refresh") { manager.login() }
-                .buttonStyle(PrimaryButtonStyle(color: .orange))
-        case .authenticated:
-            if !manager.activeAccount.isEmpty {
-                Button("Logout") {
-                    Task { await manager.logout(account: manager.activeAccount) }
-                }
-                .buttonStyle(PrimaryButtonStyle(color: .red))
-            }
-        case .unknown:
-            EmptyView()
-        }
-    }
-
-    // MARK: - Active Project
-
-    private var activeProjectSection: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "square.stack.3d.up.fill")
+    // Row 2 — Application Default Credentials
+    private var adcCredentialsRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: manager.adcInfo != nil ? "key.fill" : "key.slash")
+                .foregroundColor(manager.adcInfo != nil ? adcStatusColor : .secondary)
                 .font(.title3)
-                .foregroundColor(manager.activeProject.isEmpty ? .secondary : .blue)
-
+                .frame(width: 22, alignment: .center)
+                .padding(.top, 2)
             VStack(alignment: .leading, spacing: 2) {
+                statusLabel("App Default Credentials (ADC)")
+                if let adc = manager.adcInfo {
+                    HStack(spacing: 5) {
+                        Text(adc.email ?? adc.typeLabel)
+                            .font(.subheadline).fontWeight(.medium)
+                            .lineLimit(1).truncationMode(.middle)
+                        Text(adc.typeLabel)
+                            .font(.caption2)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(3)
+                    }
+                    if let expires = adc.expiresAt {
+                        Text("Token expires \(expires.relativeString)")
+                            .font(.caption2)
+                            .foregroundColor(adcExpiryColor(expires))
+                    }
+                } else {
+                    Text("Not configured")
+                        .font(.subheadline).fontWeight(.medium)
+                        .foregroundColor(.secondary)
+                    Text("Used by Google Cloud SDKs and client libraries")
+                        .font(.caption2).foregroundColor(.secondary)
+                }
+            }
+            Spacer()
+            if manager.adcInfo == nil {
+                Button("Login") { manager.login(applicationDefault: true) }
+                    .buttonStyle(PrimaryButtonStyle(color: .blue))
+                    .padding(.top, 2)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .help("Used by Google Cloud SDKs and client libraries when running code locally. Separate from gcloud CLI auth.")
+    }
+
+    // Row 3 — Active project
+    private var activeProjectRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "square.stack.3d.up.fill")
+                .foregroundColor(manager.activeProject.isEmpty ? .secondary : .blue)
+                .font(.title3)
+                .frame(width: 22, alignment: .center)
+                .padding(.top, 2)
+            VStack(alignment: .leading, spacing: 2) {
+                statusLabel("Active Project")
                 if manager.activeProject.isEmpty {
-                    Text("No active project")
-                        .font(.subheadline)
+                    Text("None selected")
+                        .font(.subheadline).fontWeight(.medium)
                         .foregroundColor(.secondary)
                 } else if let details = manager.activeProjectDetails {
                     Text(details.name.isEmpty ? details.projectId : details.name)
@@ -169,7 +200,59 @@ struct MenuBarView: View {
             Spacer()
         }
         .padding(.horizontal, 14)
-        .padding(.vertical, 10)
+        .padding(.vertical, 9)
+    }
+
+    private func statusLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 9, weight: .semibold))
+            .foregroundColor(.secondary)
+            .tracking(0.3)
+    }
+
+    private var cliAuthTitle: String {
+        switch manager.authStatus {
+        case .authenticated, .expiringSoon: return manager.activeAccount.isEmpty ? "Authenticated" : manager.activeAccount
+        case .expired:   return "Token Expired"
+        case .noAccount: return "Not Logged In"
+        case .unknown:   return "Checking…"
+        }
+    }
+
+    @ViewBuilder
+    private var authActionButton: some View {
+        switch manager.authStatus {
+        case .expired, .noAccount:
+            Button("Login") { manager.login() }
+                .buttonStyle(PrimaryButtonStyle(color: .blue))
+        case .expiringSoon:
+            Button("Refresh") { manager.login() }
+                .buttonStyle(PrimaryButtonStyle(color: .orange))
+        case .authenticated:
+            if !manager.activeAccount.isEmpty {
+                Button("Logout") {
+                    Task { await manager.logout(account: manager.activeAccount) }
+                }
+                .buttonStyle(PrimaryButtonStyle(color: .red))
+            }
+        case .unknown:
+            EmptyView()
+        }
+    }
+
+    private var adcStatusColor: Color {
+        guard let expires = manager.adcInfo?.expiresAt else { return .green }
+        let remaining = expires.timeIntervalSinceNow
+        if remaining < 0 { return .red }
+        if remaining < 600 { return .orange }
+        return .green
+    }
+
+    private func adcExpiryColor(_ date: Date) -> Color {
+        let remaining = date.timeIntervalSinceNow
+        if remaining < 0 { return .red }
+        if remaining < 600 { return .orange }
+        return .secondary
     }
 
     // MARK: - Error Banner
@@ -233,36 +316,32 @@ struct MenuBarView: View {
                     }
                 }
                 Divider().padding(.leading, 14)
-                HStack(spacing: 10) {
-                    Circle()
-                        .fill(manager.adcInfo != nil ? Color.green : Color.gray.opacity(0.35))
-                        .frame(width: 7, height: 7)
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text("Application Default Credentials")
-                            .font(.caption).fontWeight(.medium)
-                        Text(manager.adcInfo?.detailLabel ?? "Not configured")
+                // Login actions — one per auth type, clearly labelled with the command
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Button("Add Account") { manager.login() }
+                            .buttonStyle(PrimaryButtonStyle(color: .blue, compact: true))
+                        Text("gcloud auth login")
                             .font(.caption2).foregroundColor(.secondary)
-                            .lineLimit(1).truncationMode(.middle)
+                            .fontDesign(.monospaced)
                     }
                     Spacer()
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 6)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Button("Login (Browser)") { manager.login() }
-                            .buttonStyle(LinkButtonStyle())
-                            .help("Opens Terminal to run 'gcloud auth login'. Complete the browser OAuth flow, then click Refresh.")
-                        Button("App Default (Browser)") { manager.login(applicationDefault: true) }
-                            .buttonStyle(LinkButtonStyle())
-                            .help("Opens Terminal to run 'gcloud auth application-default login'. Sets credentials used by Google Cloud client libraries. Click Refresh after completing the browser flow.")
+                    VStack(alignment: .trailing, spacing: 3) {
+                        Button("Set App Default") { manager.login(applicationDefault: true) }
+                            .buttonStyle(PrimaryButtonStyle(color: .teal, compact: true))
+                        Text("gcloud auth application-default login")
+                            .font(.caption2).foregroundColor(.secondary)
+                            .fontDesign(.monospaced)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.trailing)
+                            .frame(maxWidth: 175, alignment: .trailing)
                     }
-                    Text("Both buttons open Terminal for an interactive browser login.")
-                        .font(.caption2).foregroundColor(.secondary)
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 8)
+                Text("Both open Terminal for a browser-based OAuth flow. Click Refresh when complete.")
+                    .font(.caption2).foregroundColor(.secondary)
+                    .padding(.horizontal, 14).padding(.bottom, 8)
             }
         }
     }
@@ -391,10 +470,11 @@ struct MenuBarView: View {
 
     // MARK: - Console
 
+    /// Visually distinct from action sections — this is a read-only log, not a control.
     private var consoleSection: some View {
         VStack(alignment: .leading, spacing: 0) {
             sectionHeader(
-                title: "Console",
+                title: "Command History",
                 count: manager.commandLog.count,
                 isExpanded: $showConsole,
                 accessory: AnyView(
@@ -411,6 +491,8 @@ struct MenuBarView: View {
             if showConsole {
                 if manager.commandLog.isEmpty {
                     emptyRow(text: "No commands run yet")
+                        .frame(maxWidth: .infinity)
+                        .background(Color(NSColor.controlBackgroundColor))
                 } else {
                     ScrollView {
                         LazyVStack(spacing: 0) {
@@ -421,6 +503,7 @@ struct MenuBarView: View {
                         }
                     }
                     .frame(maxHeight: Layout.scrollMaxHeight)
+                    .background(Color(NSColor.controlBackgroundColor))
                 }
             }
         }
